@@ -2,14 +2,18 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 
 	"text/template"
 	"unicode"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var tpl *template.Template
@@ -42,12 +46,21 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	pass := os.Getenv("SQL_PASS")
+	log.Println("Loaded password:", pass)
+
 	cfg := mysql.Config{
-		User:   "root",
-		Passwd: "SQL_PASS",
-		Net:    "tcp",
-		Addr:   "3306",
-		DBName: "testb2",
+		User:                 "root",
+		Passwd:               pass,
+		Net:                  "tcp",
+		Addr:                 "localhost:3306",
+		DBName:               "testb2",
+		AllowNativePasswords: true,
 	}
 	var lethal error
 	db, lethal = sql.Open("mysql", cfg.FormatDSN())
@@ -103,5 +116,21 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		tpl.ExecuteTemplate(w, "cregister.html", nil)
 	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Fatal("The password could not be converted to hash")
+	}
+
+	result, err := db.Exec("INSERT INTO bcrypt(Username,Email,Hash) VALUES(?,?,?)", username, email, hash)
+	if err != nil {
+		InsertError := fmt.Errorf("%v", err)
+		log.Fatal(InsertError)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		log.Fatalf("impossible to retrieve last inserted id:%s", err)
+	}
+	log.Printf("inserted id %d", id)
 
 }

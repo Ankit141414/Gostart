@@ -34,6 +34,7 @@ func main() {
 
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
 	tpl.ExecuteTemplate(w, "index.html", nil)
+
 }
 
 func RegisterHandler(w http.ResponseWriter, r *http.Request) {
@@ -122,15 +123,23 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		log.Fatal("The password could not be converted to hash")
 	}
 
-	result, err := db.Exec("INSERT INTO bcrypt(Username,Email,Hash) VALUES(?,?,?)", username, email, hash)
-	if err != nil {
-		InsertError := fmt.Errorf("%v", err)
-		log.Fatal(InsertError)
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		log.Fatalf("impossible to retrieve last inserted id:%s", err)
-	}
-	log.Printf("inserted id %d", id)
+	var sameuser string
+	row := db.QueryRow("SELECT Username FROM bcrypt WHERE Username =?", username)
+	err = row.Scan(&sameuser)
 
+	if err == nil {
+		tpl.ExecuteTemplate(w, "denied.html", "Username already exists!")
+	} else {
+		result, err := db.Exec("INSERT INTO bcrypt(Username,Email,Hash) VALUES(?,?,?)", username, email, hash)
+		if err != nil {
+			InsertError := fmt.Errorf("%v", err)
+			log.Fatal(InsertError)
+		}
+		id, err := result.LastInsertId()
+		if err != nil {
+			log.Fatalf("impossible to retrieve last inserted id:%s", err)
+		}
+		log.Printf("inserted id %d", id)
+
+	}
 }

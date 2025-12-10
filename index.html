@@ -6,7 +6,7 @@
     <title>Email Login</title>
 </head>
 <body>
-    <form action="/" method="get">
+    <form action="/" method="post">
         <label for="username">Username:</label><br>
         <input type="text" id="username" name="username"><br>
 
@@ -14,12 +14,18 @@
         <input type="email" id="email" name="email"><br>
 
         <label for="password">Password:</label><br>
-        <input type="password" id="password" name="Password"><br> <br>
+        <input type="password" id="password" name="password"><br> <br>
 
         <input type="submit" value="Submit"><br>
+
+        <br>
+
+        <a href="/register">Create Account</a>
+
+<p style="color:red">{{.}}</p>
+</body>
+</html>
     </form>
-    {{if .}}
-        {{.}}
-    {{end}}
+    
 </body>
 </html>

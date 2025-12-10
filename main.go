@@ -2,12 +2,11 @@ package main
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"regexp"
-
+	"strings"
 	"text/template"
 	"unicode"
 
@@ -20,21 +19,43 @@ var tpl *template.Template
 var db *sql.DB
 
 func main() {
+
 	var err error
 	tpl, err = template.ParseGlob("*.html")
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	err = godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	pass := os.Getenv("SQL_PASS")
+
+	cfg := mysql.Config{
+		User:                 "root",
+		Passwd:               pass,
+		Net:                  "tcp",
+		Addr:                 "localhost:3306",
+		DBName:               "testb2",
+		AllowNativePasswords: true,
+	}
+
+	db, err = sql.Open("mysql", cfg.FormatDSN())
+	if err != nil {
+		log.Fatal("Cannot open the database:", err)
+	}
+
+	if err = db.Ping(); err != nil {
+		log.Fatal("Cannot connect to database:", err)
+	}
+
 	http.HandleFunc("/", IndexHandler)
 	http.HandleFunc("/register", RegisterHandler)
 
+	log.Println("Server running on http://localhost:8080")
 	http.ListenAndServe("localhost:8080", nil)
-
-}
-
-func IndexHandler(w http.ResponseWriter, r *http.Request) {
-	tpl.ExecuteTemplate(w, "index.html", nil)
-
 }
 
 func RegisterHandler(w http.ResponseWriter, r *http.Request) {
@@ -47,29 +68,6 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-
-	pass := os.Getenv("SQL_PASS")
-	log.Println("Loaded password:", pass)
-
-	cfg := mysql.Config{
-		User:                 "root",
-		Passwd:               pass,
-		Net:                  "tcp",
-		Addr:                 "localhost:3306",
-		DBName:               "testb2",
-		AllowNativePasswords: true,
-	}
-	var lethal error
-	db, lethal = sql.Open("mysql", cfg.FormatDSN())
-	if lethal != nil {
-		panic("Cant open the database system!")
-	}
-	defer db.Close()
-
 	emailRe := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 	if !emailRe.MatchString(email) {
 		tpl.ExecuteTemplate(w, "denied.html", "Invalid email")
@@ -77,13 +75,13 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(username) < 5 || len(username) > 15 {
-		tpl.ExecuteTemplate(w, "denied.html", "Username length must be 5–15")
+		tpl.ExecuteTemplate(w, "denied.html", "Username must be 5–15 characters")
 		return
 	}
 
 	for _, v := range username {
 		if unicode.IsSymbol(v) || unicode.IsSpace(v) {
-			tpl.ExecuteTemplate(w, "denied.html", "Username cannot have symbols or spaces")
+			tpl.ExecuteTemplate(w, "denied.html", "Username cannot contain symbols or spaces")
 			return
 		}
 	}
@@ -91,7 +89,7 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	var hasUpper, hasLower, hasNum, hasSymbol bool
 
 	if len(password) < 5 || len(password) > 15 {
-		tpl.ExecuteTemplate(w, "denied.html", "Password length must be 5–15")
+		tpl.ExecuteTemplate(w, "denied.html", "Password must be 5–15 characters")
 		return
 	}
 
@@ -112,34 +110,62 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !hasUpper || !hasLower || !hasNum || !hasSymbol {
-		tpl.ExecuteTemplate(w, "denied.html", "Password must contain upper, lower, number and symbol")
+		tpl.ExecuteTemplate(w, "denied.html", "Password must contain upper, lower, number, and symbol")
 		return
-	} else {
-		tpl.ExecuteTemplate(w, "cregister.html", nil)
+	}
+
+	var existing string
+	err := db.QueryRow("SELECT Username FROM bcrypt WHERE Username = ?", username).Scan(&existing)
+	if err == nil {
+		tpl.ExecuteTemplate(w, "denied.html", "Username already exists!")
+		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		log.Fatal("The password could not be converted to hash")
+		tpl.ExecuteTemplate(w, "denied.html", "Hashing error")
+		return
 	}
 
-	var sameuser string
-	row := db.QueryRow("SELECT Username FROM bcrypt WHERE Username =?", username)
-	err = row.Scan(&sameuser)
-
-	if err == nil {
-		tpl.ExecuteTemplate(w, "denied.html", "Username already exists!")
-	} else {
-		result, err := db.Exec("INSERT INTO bcrypt(Username,Email,Hash) VALUES(?,?,?)", username, email, hash)
-		if err != nil {
-			InsertError := fmt.Errorf("%v", err)
-			log.Fatal(InsertError)
-		}
-		id, err := result.LastInsertId()
-		if err != nil {
-			log.Fatalf("impossible to retrieve last inserted id:%s", err)
-		}
-		log.Printf("inserted id %d", id)
-
+	_, err = db.Exec("INSERT INTO bcrypt (Username, Email, Hash) VALUES (?, ?, ?)", username, email, hash)
+	if err != nil {
+		tpl.ExecuteTemplate(w, "denied.html", "Database insert error")
+		return
 	}
+
+	tpl.ExecuteTemplate(w, "cregister.html", username)
+}
+
+func IndexHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		tpl.ExecuteTemplate(w, "index.html", nil)
+		return
+	}
+
+	username := strings.TrimSpace(r.FormValue("username"))
+	password := strings.TrimSpace(r.FormValue("password"))
+
+	if username == "" || password == "" {
+		tpl.ExecuteTemplate(w, "login.html", "Username and password cannot be empty")
+		return
+	}
+
+	var dbHash []byte
+	err := db.QueryRow("SELECT Hash FROM bcrypt WHERE Username = ?", username).Scan(&dbHash)
+	if err == sql.ErrNoRows {
+		tpl.ExecuteTemplate(w, "login.html", "Invalid username or password")
+		return
+	} else if err != nil {
+		log.Println("DB error:", err)
+		tpl.ExecuteTemplate(w, "login.html", "Server error")
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword(dbHash, []byte(password))
+	if err != nil {
+		tpl.ExecuteTemplate(w, "login.html", "Incorrect username or password")
+		return
+	}
+
+	tpl.ExecuteTemplate(w, "welcome.html", username)
 }

@@ -53,9 +53,10 @@ func main() {
 
 	http.HandleFunc("/", IndexHandler)
 	http.HandleFunc("/register", RegisterHandler)
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
 	log.Println("Server running on http://localhost:8080")
-	http.ListenAndServe("localhost:8080", nil)
+	log.Fatal(http.ListenAndServe("localhost:8080", nil))
 }
 
 func RegisterHandler(w http.ResponseWriter, r *http.Request) {

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"net/smtp"
 	"os"
 	"regexp"
 	"strings"
@@ -53,6 +54,7 @@ func main() {
 
 	http.HandleFunc("/", IndexHandler)
 	http.HandleFunc("/register", RegisterHandler)
+	http.HandleFunc("/recoverpassword", PasswordHandler)
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
 	log.Println("Server running on http://localhost:8080")
@@ -169,4 +171,38 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tpl.ExecuteTemplate(w, "welcome.html", username)
+}
+
+func PasswordHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		tpl.ExecuteTemplate(w, "password.html", nil)
+		return
+	}
+
+	email := r.FormValue("email")
+	var data string
+
+	row := db.QueryRow("SELECT Email FROM bcrypt WHERE Email = ?", email)
+	err := row.Scan(&data)
+	if err == sql.ErrNoRows {
+		tpl.ExecuteTemplate(w, "check.html", nil)
+		return
+	}
+
+	To := []string{email}
+	From := ("ankitgng.boy@gmail.com")
+	password := os.Getenv("APP_PASS")
+
+	subject := []byte("Password Recovery Email!")
+	body := []byte("Use this link to reset your password!")
+	message := append(subject, body...)
+	hostname := "smtp.gmail.com"
+
+	auth := smtp.PlainAuth("", From, password, hostname)
+	mail := smtp.SendMail("smtp.gmail.com:587", auth, From, To, message)
+	if mail != nil {
+		log.Fatal("Couldnot send the email")
+	}
+	tpl.ExecuteTemplate(w, "check.html", "Please  check your email!")
+
 }

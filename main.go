@@ -2,6 +2,8 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/smtp"
@@ -55,6 +57,7 @@ func main() {
 	http.HandleFunc("/", IndexHandler)
 	http.HandleFunc("/register", RegisterHandler)
 	http.HandleFunc("/recoverpassword", PasswordHandler)
+	http.HandleFunc("/fileupload", fileUpload)
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
 	log.Println("Server running on http://localhost:8080")
@@ -205,4 +208,33 @@ func PasswordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	tpl.ExecuteTemplate(w, "check.html", "Please  check your email!")
 
+}
+
+func fileUpload(w http.ResponseWriter, r *http.Request) {
+	r.ParseMultipartForm(10 << 20)
+	file, handler, err := r.FormFile("filename")
+	if err != nil {
+		fmt.Println(err)
+	}
+	defer file.Close()
+	//fmt.Println("File headers", handler.Header.Get("Content-Type"))
+	if handler.Header.Get("Content-Type") == "image/jpeg" {
+		imgfile, err := os.Create("imges.jpeg")
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		defer imgfile.Close()
+
+		_, err = io.Copy(imgfile, file)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		tpl.ExecuteTemplate(w, "uploaded.html", nil)
+		return
+	}
+
+	tpl.ExecuteTemplate(w, "uploaded.html", "Please upload an image file")
 }
